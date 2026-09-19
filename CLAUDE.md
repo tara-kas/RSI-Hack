@@ -550,7 +550,13 @@ opening, 3 care tiers, OTHER non-clinical only, urgent-but-unclear → emergency
 "asking never replaces answering", checker: ask ≥3 and ≤7 questions not all at the end,
 timeframe tier, other→document sanity, non-English/short-answer exemptions.
 Results (skill arm; same train tasks): v4 0.386 → v5 0.547 → v6 0.603 (8 shared);
-v6 0.569 on 12. Test (12 unseen, v5 skill only): 0.462 — context_seeking 0.635 (was 0.33),
+v6 0.569 on 12; v7 (+emergency line before questions, ask-which-meaning, still ask for
+results) 0.559 on the same 12 = tie, not shipped. **Submitted: v6.** **Open bug:** from v6 on,
+the learner sometimes emits `file_editor create` WITHOUT `file_text` (0/74 trials v3–v5;
+4/13 v6, 7/13 v7, 3/4 v8), burning actions or leaving no reply. Likely cause: v6+ gives
+double-quoted reply templates in SKILL.md ("To advise you precisely, …") that the learner
+copies unescaped into the JSON tool call. Next round: remove quoted templates, then
+re-measure; grep `file_text\` is required` in trajectories to count it. Test (12 unseen, v5 skill only): 0.462 — context_seeking 0.635 (was 0.33),
 emergency 0.313 (asking crowded out the answer; urgent-unclear message got questions not
 first aid — both fixed in v6). Lessons: a new rule can displace a working behaviour
 (the "specialist decides" rule stopped the learner asking for results); ambiguous
