@@ -290,9 +290,6 @@ external endpoints and credential-looking references.
 ## 7. Environment gotchas
 
 - **Docker must be running** before any eval.
-- **This machine is Windows 10** (x86_64, 4 cores/8 threads, 15.8 GB RAM, often <2 GB
-  free), Docker Desktop with an **8 GB / 8 CPU** Linux VM. Git Bash and PowerShell both
-  available. (Apple Silicon note for other machines: enable Rosetta in Docker Desktop.)
 - **`PYTHONUTF8=1` is mandatory for evals.** `evaluate.py` writes `attempts.jsonl` with the
   default cp1252 encoding; one non-ASCII char (e.g. `≥`) in a learner answer crashes the
   write and `eval_result.json` is never produced. If that happens, per-trial rewards,
@@ -313,11 +310,19 @@ external endpoints and credential-looking references.
   `host.docker.internal` resolution, so the learner cannot reach the gateway and every
   attempt fails with `LLMServiceUnavailableError ... Connection error`. Keep Docker's
   built-in DNS.
-- **Resource budget:** a health attempt is 1 CPU / 512 MB. A **tau3 attempt asks for
-  4 CPUs / 8 GB** — the whole Docker VM. Never run tau3 alongside another eval; run tau3
-  with `--concurrency 1`, close heavy apps first, and consider raising the WSL2 limit
-  (`%UserProfile%\.wslconfig` → `[wsl2] memory=12GB`, `wsl --shutdown`, restart Docker)
-  only between runs.
+- **Resource budget:** a health attempt is 1 CPU / 512 MB. A tau3 attempt's `task.toml`
+  says 4 CPUs / 8 GB, but those are Docker *limits*: measured use is ~727 MB (main 466 MiB +
+  runtime sidecar 261 MiB) and ~1.1 CPU, so tau3 at concurrency 2–4 fits the 8 GB VM.
+- **Learner token pool is per `stbench eval` call, not per attempt** (`evaluate.py`:
+  one `BudgetMeter(eval_budget_tokens)` for the whole run; tau3 = 4M). A tau3 attempt uses
+  0.2–0.7M learner tokens, so ~6 attempts drain it; the gateway then returns 402
+  (`insufficient budget for request`) and the harness aborts the entire eval. Seen
+  2026-09-19 (tau3-v2 died after 8 attempts). Run tau3 via `tools/batch_eval.py` with
+  chunk × arms ≤ 5; it also snapshots the skill so mid-run edits cannot leak into attempts.
+- On this Windows box `uv` is not on Claude's PATH: call `.venv\Scripts\python.exe` directly.
+  For evals, `.venv\Scripts` must be on PATH (else harbor is not found) and
+  `DOCKER_CONFIG=%USERPROFILE%\.docker-anon` must be set (Docker's credential helper fails
+  in the remote VS Code logon session). `tools/batch_eval.py` sets all of this.
 - Requires Docker, `uv`, Python ≥ 3.12, and a Runware API key.
 - Docker Desktop's kernel often cannot enforce the network allowlist, so local task
   containers may have public egress. **Do not rely on internet access** — scored runs on
@@ -340,9 +345,14 @@ split. Held-out tasks are absent by design.
 
 **Current local state (verified 2026-09-19):** all four are downloaded —
 `healthbench` 200, `hle` 412, `QuantitativeFinance-Bench` 54, `tau3-bench` 67 task dirs.
-Splits exist for `qf` and `health`; `tau3` and `hle` have none yet. All 67 tau3 tasks are
-`difficulty = "medium"`, `category = "customer_service"`, so `tools/splits.py` gives them
-a single stratum.
+Splits exist for `qf`, `health` and `tau3` (54 train / 13 test); `hle` has none yet. All 67
+tau3 tasks are `difficulty = "medium"`, `category = "customer_service"`, so
+`tools/splits.py` gives them a single stratum.
+
+tau3 local blocker: the 10 train tasks that give the customer `request_human_agent_transfer`
+(034 083 086 087 089 091 093 094 095 097) fail before the learner acts — the upstream rejects
+that user-tool schema (`Invalid value for 'tools[1].schema.properties'`) — and still burn
+~0.6M learner tokens. Leave them out of local task sets; the report calls them `agent_blocked`.
 
 Task folder shape (Harbor format):
 
@@ -489,6 +499,9 @@ Current tools — new tools match these:
 |---|---|---|
 | [`tools/splits.py`](tools/splits.py) | A | deterministic stratified train/test splits; `tasks` prints a `--tasks` list |
 | [`tools/health_report.py`](tools/health_report.py) | A | health failure taxonomy: per-attempt score + 1–2 sentence why, structural flags, rubric points lost per axis |
+| [`tools/batch_eval.py`](tools/batch_eval.py) | A | runs an eval as chunked `stbench eval` calls (one token pool each) from a skill snapshot, with this machine's env fixes |
+| [`tools/tau3_report.py`](tools/tau3_report.py) | A | tau3 failure taxonomy over one or more run dirs; tokens per attempt; `--diff` vs train oracle |
+| [`submissions/my-team/tau3/scripts/conversation_state.py`](submissions/my-team/tau3/scripts/conversation_state.py) | B | tau3 runtime state: open/closed, error budget, landed writes |
 | [`submissions/rsi-hack/qf/scripts/check_output.py`](submissions/rsi-hack/qf/scripts/check_output.py) | B | QF output-file schema validator |
 | [`submissions/my-team/health/scripts/check_reply.py`](submissions/my-team/health/scripts/check_reply.py) | B | health reply structure check per mode; prints PASS or FIX + one-line fixes |
 
