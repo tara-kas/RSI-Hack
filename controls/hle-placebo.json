@@ -1,0 +1,20 @@
+{
+  "domain": "hle",
+  "arm": "placebo",
+  "source_run": "runs/hle-ctrl",
+  "n_tasks": 10,
+  "mean": 0.2,
+  "note": "Valid only for these task names, and only while the learner and its limits are unchanged. Re-measure if hackathon.toml changes.",
+  "scores": {
+    "hle__66b91693d86bff9a12fc1f99": 0.0,
+    "hle__66e4cdec11c64a7e4051b2d9": 0.0,
+    "hle__66e8967ae99ca52dd4b94441": 0.0,
+    "hle__66e8ae613aa94517d4573b33": 0.0,
+    "hle__66e932f00bd16d40d4bc4d81": 0.0,
+    "hle__66e93893a3326adf2da92ef0": 0.0,
+    "hle__66e942c180435ab1cb1ef049": 1.0,
+    "hle__66e96946cde24c5e61925dc1": 0.0,
+    "hle__66ea12d21684c1846037a28d": 0.0,
+    "hle__66ea2cc3c602e2b991ae8aba": 1.0
+  }
+}

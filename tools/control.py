@@ -48,7 +48,32 @@ def _scores(run: Path, arm: str) -> dict[str, float]:
         if out:
             return out
 
+    # Merge every source rather than taking the first that returns anything. A run that is
+    # killed mid-flight leaves attempts.jsonl partially written while Harbor's per-trial
+    # result.json files are complete, so preferring one silently discards real measurements.
+    merged: dict[str, float] = {}
     attempts = run / "attempts.jsonl"
+    if attempts.is_file() and attempts.stat().st_size:
+        for line in attempts.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("arm") == arm and isinstance(row.get("score"), (int, float)):
+                merged[row.get("task_name") or row.get("task_id")] = float(row["score"])
+    import glob as _g
+    for path in _g.glob(str(run / "harbor-jobs" / "*" / "*" / "result.json")):
+        try:
+            data = json.loads(Path(path).read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not data.get("finished_at"):
+            continue
+        reward = (data.get("verifier_result") or {}).get("rewards", {}).get("reward")
+        if isinstance(reward, (int, float)):
+            merged.setdefault(str(data.get("task_name", "")).split("/")[-1], float(reward))
+    if merged:
+        return merged
+
     if not attempts.is_file() or not attempts.stat().st_size:
         # Last resort: read Harbor's per-trial results. A run that is killed (or that
         # exhausts its token budget) never writes the summary files, and those trials are
