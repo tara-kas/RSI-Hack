@@ -537,3 +537,22 @@ Worst loss (−0.46): a parent-facing clinical document routed to `--mode other`
 skips all checks, and it omitted dosing/complication details. Watch OTHER being used as
 an escape hatch for clinical documents.
 Rough cost: ~$0.05/health attempt (grader dominates); time is the constraint.
+
+**Round 2 (2026-09-19, deadline day).** Mining all 160 train rubrics (bucketing
+`level:example` criteria) showed the biggest bucket is *specific clarifying questions*
+(50/80 context_seeking tasks, 917 pts; v4 missed 78%), then "at the start" criteria
+(13/30 emergency) and a tiered referral (emergency now / doctor within N days / fine at
+home; 28/30 emergency). `example.json` tags `physician_agreed_category:*` give the
+subtype (not-enough-context, conditionally-emergent, ...) — v4 chose `answer` on 5/7
+not-enough-context tasks. Length had no signal (r=0.08). Shared `level:cluster` criteria
+are only ~10% of criteria (5 pts each). Changes: ASK-by-default, questions right after the
+opening, 3 care tiers, OTHER non-clinical only, urgent-but-unclear → emergency first aid,
+"asking never replaces answering", checker: ask ≥3 and ≤7 questions not all at the end,
+timeframe tier, other→document sanity, non-English/short-answer exemptions.
+Results (skill arm; same train tasks): v4 0.386 → v5 0.547 → v6 0.603 (8 shared);
+v6 0.569 on 12. Test (12 unseen, v5 skill only): 0.462 — context_seeking 0.635 (was 0.33),
+emergency 0.313 (asking crowded out the answer; urgent-unclear message got questions not
+first aid — both fixed in v6). Lessons: a new rule can displace a working behaviour
+(the "specialist decides" rule stopped the learner asking for results); ambiguous
+one-line messages must be clarified, not assumed. `tools/leak_screen.py` = n-gram
+overlap screen of a skill vs all local rubrics/prompts.
