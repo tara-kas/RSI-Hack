@@ -313,7 +313,96 @@ Licensing is **per dataset folder**, not uniform. QF is non-commercial.
 
 ---
 
-## 10. Repo hygiene note
+## 10. Tooling conventions
+
+**All tools in this repo are Python 3.12+.** Not bash, not a mix. The repo is already a
+Python project (`pyproject.toml`, `uv`), skill scripts must run inside the task container
+where Python plus `numpy`/`pandas` is what exists, and a single language means one mental
+model for both. Reach for bash only for a genuine one-liner that will never grow.
+
+There are **two classes of tool** with different constraints. Do not blur them.
+
+### Class A — repo tools (`tools/`)
+
+Run on the host, by us, via `uv run python tools/<name>.py`. May import project
+dependencies and read `hackathon.toml`. Never invoked by the learner.
+
+### Class B — skill scripts (`submissions/<team>/<domain>/scripts/`)
+
+Run **inside the air-gapped task container**, invoked by the learner model via a shell
+command that `SKILL.md` spells out. These carry hard extra rules:
+
+- **stdlib only**, plus what the task image already pins (`numpy`, `pandas`, `scipy`,
+  `pyarrow`, `statsmodels`, `scikit-learn`, `matplotlib`, `ta-lib`). Import the heavy ones
+  *inside* the function that needs them and degrade gracefully if absent.
+- **No network, no credentials, no `pip install`** — `check-skill` flags external endpoints
+  and the container has no egress anyway.
+- They count against the 200-file / 1 MB submission budget.
+- `SKILL.md` must give the **absolute** container path
+  (`/harbor/skills/stbench-skill/scripts/<name>.py`) — the learner will not guess it.
+- Output is read by a model, not a human: print plainly, state what a clean result does
+  *not* prove, and make failure messages say what to do next.
+
+### House format (both classes)
+
+```python
+#!/usr/bin/env python3
+"""One line: what this does.
+
+Why it exists and what it is not, then runnable usage examples:
+
+    python3 thing.py <input> --flag value
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+
+def do_work(path: Path, strict: bool) -> int:
+    ...
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("path")
+    ap.add_argument("--strict", action="store_true", help="what this changes")
+    a = ap.parse_args()
+    return do_work(Path(a.path), a.strict)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+```
+
+Rules:
+
+- Shebang, and `chmod +x` the file.
+- Module docstring carries **runnable** usage examples; `description=__doc__` with
+  `RawDescriptionHelpFormatter` so `--help` shows them.
+- `from __future__ import annotations`; type hints on every signature.
+- `argparse` only — no click, no bare `sys.argv`. Several modes means
+  `add_subparsers(dest="cmd", required=True)`, as in `tools/splits.py`.
+- `main() -> int` returning an exit code; `sys.exit(main())` under `__main__`. Never call
+  `exit()` mid-function.
+- **Exit codes**: `0` success. `1` the thing being checked failed (a real finding — the
+  caller may act on it). `raise SystemExit("message")` for *usage* errors — bad flags,
+  missing config, a split that does not exist — so the two are distinguishable.
+- Deterministic by construction: seed explicitly, sort before iterating, never depend on
+  `set`/`dict` ordering. Anything that writes a file records its seed and inputs in that
+  file.
+- Destructive writes refuse to clobber without `--force`, and the refusal explains the
+  consequence rather than just saying "exists".
+- Print human-readable text to stdout. Add `--json` only when something will parse it.
+- Comments explain **why**, not what. Match the surrounding density.
+
+Current tools: [`tools/splits.py`](tools/splits.py) (Class A),
+[`submissions/rsi-hack/qf/scripts/check_output.py`](submissions/rsi-hack/qf/scripts/check_output.py)
+(Class B). New tools match these.
+
+## 11. Repo hygiene note
 
 `.env_example` currently has a **real-looking Runware API key committed into it**
 (`RUNWARE_API_KEY=Bxa...`) — it is a tracked, uncommitted modification on `main`.
