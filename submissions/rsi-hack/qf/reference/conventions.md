@@ -71,3 +71,32 @@ looks plausible but you want a second opinion before committing. When the instru
 3. Compute both readings on a small slice and see which produces the rounder, more
    "designed-looking" number at the stated precision.
 4. Pick one, implement it consistently everywhere, and state the assumption in your summary.
+
+## Plausibility ranges
+
+Use these to catch order-of-magnitude and sign errors before writing output. A value outside
+the range is a bug until proven otherwise — re-derive rather than rationalise.
+
+| quantity | believable range | what a breach usually means |
+|---|---|---|
+| annualised Sharpe | −1 to 1.5 typical; >3 almost never real | costs skipped, returns double-counted, look-ahead bias |
+| information ratio | −1 to 1.5 | same as Sharpe, or tracking error understated |
+| annualised volatility (equity) | 5% to 60% | wrong annualisation factor, or percent/fraction mixup |
+| max drawdown | 0 to 1, reported positive | sign convention, or compounding applied wrongly |
+| hit rate / win rate | 0.4 to 0.6 for daily strategies | counting rebalances instead of days |
+| residual beta of a "neutral" strategy | near 0 | neutralisation never applied, or applied pooled instead of per date |
+| correlation | −1 to 1 | covariance not normalised |
+| option delta | −1 to 1 | undiscounted or mis-signed |
+| probability, quantile | 0 to 1 | percent/fraction mixup |
+| turnover | 0 to ~10 per year for monthly rebalancing | counting both legs twice |
+
+## Internal identities worth checking
+
+These must hold by definition. A violation is a guaranteed bug and costs nothing to detect:
+
+- `sharpe = annualised_return / annualised_volatility` (at the stated risk-free convention)
+- `information_ratio = annualised_alpha / tracking_error`
+- portfolio weights sum to the stated gross or net exposure
+- long leg count + short leg count = total positions
+- a reported count (rebalances, missing values, events) equals an independently recomputed one
+- residual variance + explained variance = total variance in a regression

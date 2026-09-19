@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -53,7 +54,76 @@ def _walk(obj, prefix: str = ""):
         yield (prefix, obj)
 
 
-def check_json(path: Path, required_keys: list[str], allow_nan: bool) -> None:
+# Ranges a practitioner would not believe. Deliberately wide: these catch order-of-magnitude
+# and sign errors (costs never charged, returns double-counted, percent/fraction mixups),
+# not borderline-unusual results. Matched on substrings of the field name.
+_PLAUSIBLE = {
+    "sharpe": (-3.0, 3.0),
+    "information_ratio": (-3.0, 3.0),
+    "hit_rate": (0.0, 1.0),
+    "win_rate": (0.0, 1.0),
+    "max_drawdown": (0.0, 1.0),
+    "volatility": (0.0, 2.0),
+    "tracking_error": (0.0, 2.0),
+    "beta": (-3.0, 3.0),
+    "correlation": (-1.0, 1.0),
+    "probability": (0.0, 1.0),
+    "annualized_return": (-2.0, 2.0),
+    "annualized_alpha": (-2.0, 2.0),
+    "turnover": (0.0, 50.0),
+}
+
+
+def check_plausible(flat: dict[str, float]) -> None:
+    """Flag values outside ranges a practitioner would believe."""
+    for key, value in flat.items():
+        low_key = key.lower()
+        for pattern, (lo, hi) in _PLAUSIBLE.items():
+            if pattern in low_key and not (lo <= value <= hi):
+                fail(f"implausible {key}={value!r}: expected roughly [{lo}, {hi}]. "
+                     "Check for skipped costs, double-counted returns, a sign error, "
+                     "or percent-vs-fraction confusion")
+                break
+
+
+def check_identity(flat: dict[str, float], expr: str) -> None:
+    """Check `target=<arithmetic over other fields>`, e.g.
+    sharpe_ratio=annualized_return/annualized_volatility."""
+    if "=" not in expr:
+        raise SystemExit(f"--identity needs the form target=expression, got {expr!r}")
+    target, rhs = (part.strip() for part in expr.split("=", 1))
+    if target not in flat:
+        fail(f"--identity target {target!r} is not a numeric field in this file")
+        return
+    names = sorted(set(re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", rhs)), key=len, reverse=True)
+    missing = [n for n in names if n not in flat]
+    if missing:
+        fail(f"--identity refers to fields not in this file: {missing}")
+        return
+    substituted = rhs
+    for name in names:
+        substituted = substituted.replace(name, repr(flat[name]))
+    if not re.fullmatch(r"[0-9eE_.+\-*/() ]+", substituted):
+        raise SystemExit("--identity supports only + - * / ( ) over field names and numbers")
+    try:
+        expected = eval(substituted, {"__builtins__": {}}, {})  # noqa: S307 - literals only
+    except ZeroDivisionError:
+        fail(f"--identity {expr}: division by zero — a denominator field is 0")
+        return
+    actual = flat[target]
+    if expected == 0:
+        ok = abs(actual) <= 1e-9
+    else:
+        ok = abs(actual - expected) <= max(1e-6, abs(expected) * 0.01)
+    if ok:
+        note(f"identity holds: {target}={actual:.6g} matches {rhs} = {expected:.6g}")
+    else:
+        fail(f"identity VIOLATED: {target}={actual:.6g} but {rhs} = {expected:.6g}. "
+             "At least one of these fields is computed wrong")
+
+
+def check_json(path: Path, required_keys: list[str], allow_nan: bool,
+               identity: str = "", plausible: bool = False) -> None:
     raw = path.read_text()
     try:
         data = json.loads(raw, parse_constant=_reject_nonfinite)
@@ -88,6 +158,24 @@ def check_json(path: Path, required_keys: list[str], allow_nan: bool) -> None:
                 continue
             note(f"numeric-looking value stored as a STRING at {p!r}: {v!r} — "
                  "graders usually compare numbers, not strings")
+
+    # Flatten numeric leaves under both their full path and their bare leaf name, so an
+    # identity or plausibility rule can name a field without spelling out its nesting
+    # (tasks often bury values under e.g. "intermediates.sharpe_ratio.value").
+    flat: dict[str, float] = {}
+    for p, v in leaves:
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        flat[p] = float(v)
+        leaf = p.split(".")[-1]
+        if leaf == "value" and "." in p:
+            leaf = p.split(".")[-2]
+        flat.setdefault(leaf, float(v))
+
+    if plausible:
+        check_plausible(flat)
+    if identity:
+        check_identity(flat, identity)
 
 
 def check_table(path: Path, required_cols: list[str], ordered: bool,
@@ -177,6 +265,12 @@ def main() -> int:
     ap.add_argument("--ordered", action="store_true",
                     help="also require --columns to match the file's column order exactly")
     ap.add_argument("--rows", type=int, default=None, help="expected row count")
+    ap.add_argument("--identity", default="",
+                    help="check an arithmetic relation between JSON fields, e.g. "
+                         "\"sharpe_ratio=annualized_return/annualized_volatility\"")
+    ap.add_argument("--plausible", action="store_true",
+                    help="flag financially implausible magnitudes (Sharpe>3, |beta|>3, "
+                         "hit rate outside [0,1], ...)")
     ap.add_argument("--no-nan", dest="no_nan", action="store_true",
                     help="treat any NaN in the output as a failure (usually correct)")
     a = ap.parse_args()
@@ -195,7 +289,8 @@ def main() -> int:
     cols = [c.strip() for c in a.columns.split(",") if c.strip()]
 
     if path.suffix.lower() == ".json":
-        check_json(path, keys, allow_nan=not a.no_nan)
+        check_json(path, keys, allow_nan=not a.no_nan, identity=a.identity,
+                   plausible=a.plausible)
     else:
         check_table(path, cols, a.ordered, allow_nan=not a.no_nan, expect_rows=a.rows)
 

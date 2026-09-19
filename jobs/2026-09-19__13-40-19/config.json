@@ -1,0 +1,13 @@
+{
+    "agents": [
+        {
+            "name": "claude-code",
+            "model_name": "claude-haiku-4-5"
+        }
+    ],
+    "tasks": [
+        {
+            "path": "/var/folders/7m/7ffzx1nj0zd846lqn8hl57gw0000gq/T/harbor-analyze-6t757l6k/analyze-task__U3UVdB5"
+        }
+    ]
+}

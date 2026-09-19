@@ -1,0 +1,17 @@
+{
+  "domain": "health",
+  "arm": "baseline",
+  "source_run": "runs/health-v1",
+  "n_tasks": 7,
+  "mean": 0.172378,
+  "note": "Valid only for these task names, and only while the learner and its limits are unchanged. Re-measure if hackathon.toml changes.",
+  "scores": {
+    "healthbench-hard-00656524-cc51-47a3-bfb5-85e7096ee1c8": 0.2876712328767123,
+    "healthbench-hard-02109c83-28b1-4269-b4b2-5ceefb66524e": -0.11827956989247312,
+    "healthbench-hard-034d78e2-0873-4e4a-9621-735b51d0d020": 0.029411764705882353,
+    "healthbench-hard-05bb23aa-3965-419a-a986-79c301d9270e": 0.09090909090909091,
+    "healthbench-hard-062e3a49-07e0-4b5c-a941-ceb8cc4111e4": 0.3,
+    "healthbench-hard-06902be5-32f0-4adc-ba00-e5ad2f98ea2d": 0.375,
+    "healthbench-hard-09583fec-46bd-4a79-a524-94261baa875d": 0.24193548387096775
+  }
+}

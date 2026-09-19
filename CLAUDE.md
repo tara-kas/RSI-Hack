@@ -25,7 +25,7 @@ available locally.
 
 | domain | benchmark | learner does | score per task |
 |---|---|---|---|
-| `qf` | QuantitativeFinance-Bench | solves a quant-finance task in a sandbox | task tests pass/fail |
+| `qf` | QuantitativeFinance-Bench | solves a quant-finance task in a sandbox | task tests pass/fail (**all-or-nothing**) |
 | `health` | HealthBench | answers a health conversation | model-grader rubric, 0–1 |
 | `tau3` | τ³-bench | serves a simulated customer via tool calls | task assertions pass/fail |
 | `hle` | Humanity's Last Exam | answers an expert-level question | model-graded pass/fail |
@@ -102,6 +102,19 @@ Double-check your arithmetic. End with a line: #### <answer>.
 
 ---
 
+### QF scoring is strictly all-or-nothing
+
+Six QF tasks ship a partial-credit verifier (`conftest.py` writes `reward = passed / total`),
+but **the harness discards it**: `tasks.py` sets `FRACTIONAL = frozenset({"healthbench"})`, so
+a qf attempt scores `1.0 if verifier.success else 0.0`, and `is_pass` requires
+`reward >= PASS_REWARD` (1.0). A qf task scoring 0.75 counts as **0.0**.
+
+Consequences for a qf skill: there is no value in partial correctness, so the skill must
+maximise the probability that *every* assertion passes — completeness and verification, not
+best-effort. Measured on the first baseline run, the learner used 133k tokens and 7 of its 30
+available minutes, then stopped with a structurally valid file full of wrong numbers. Stopping
+early, not running out of budget, is the dominant failure mode.
+
 ## 4. The frozen learner contract (`hackathon.toml` — read-only)
 
 - Learner model: **`zai-glm-5-3-flash`** via Runware. Write for *this* model — not for
@@ -126,13 +139,46 @@ prescribe long multi-step exploration; it has to pay off in the first response.
 
 ---
 
-## 5. Repo layout
+## 5. Measured costs and operational gotchas
+
+Numbers measured on this machine, not estimates. They decide what is feasible.
+
+| domain | tokens/trial | time/trial | trials per invocation |
+|---|---:|---:|---:|
+| `qf` | ~504,000 | ~8 min | **~8** (4M budget) |
+| `hle` | ~43,000 | ~3.2 min | ~46 (2M budget) |
+| `health` | ~25,000 | ~2.0 min | ~80 (2M budget) |
+
+- **`eval_budget_tokens` is per invocation**, not global: `run_eval` builds a fresh
+  `BudgetMeter`. Parallel `stbench eval` calls therefore each get their own budget, which is
+  the only way to measure more than ~8 qf tasks. Exceeding it kills the run mid-flight with a
+  gateway 402 and the remaining attempts become false failures.
+- **`memory_mb` in task.toml is a cap, not a reservation.** QF tasks declare 4096 MB and use
+  ~450 MB. During `agent_execution` containers are API-bound (CPU ~0.5%); during
+  `agent_setup` they are CPU-bound. Concurrency 6–8 per invocation is fine; ~18–20 containers
+  total is where an 8-core/12 GB host starts contending.
+- **Never run `uv run` while an eval is in flight.** It re-syncs the project and races on the
+  editable install, leaving `_editable_impl_skilltrainbench.pth` empty and breaking every
+  later launch with `ModuleNotFoundError`. Launch evals with the venv binary directly:
+  `PYTHONPATH="$PWD/src" PATH="$PWD/.venv/bin:$PATH" .venv/bin/stbench eval ...`, and use
+  `.venv/bin/harbor view` rather than `uv run harbor view`.
+- **Runs can hang after finishing.** A run whose trials are all complete may never exit,
+  holding the metering gateway port so the next run cannot start. Symptom: finished trials,
+  no new containers. Kill it; its per-trial results are already on disk. Orphaned
+  `docker compose --project-name task__*` processes block new containers the same way.
+
+## 6. Repo layout
 
 ```
 hackathon.toml              the pinned learner contract (READ-ONLY)
 README.md                   hackathon rules and the eval loop
 src/skilltrainbench/        harness: gateway.py, harbor.py, evaluate.py, scoring.py,
                             tasks.py, config.py, cli.py   (READ-ONLY for scoring purposes)
+tools/                      our host-side tools (see Tooling conventions)
+  splits.py                 deterministic stratified train/test splits
+  control.py                save a measured control arm; score skill-only runs against it
+  progress.py               live progress + token burn for in-flight runs
+splits/ · controls/         generated: local splits, saved control arms
 submissions/                our skills live here
   README.md                 submission layout + check-skill
   example-team/health/SKILL.md   format-only example, not tuned for anything
@@ -170,7 +216,7 @@ staged. Supporting files (references, checklists, offline helper scripts) sit ne
 
 ---
 
-## 6. Commands
+## 7. Commands
 
 Setup (already done here — `.venv/` and `.env` exist):
 
@@ -230,7 +276,7 @@ external endpoints and credential-looking references.
 
 ---
 
-## 7. Environment gotchas
+## 8. Environment gotchas
 
 - **Docker must be running** before any eval.
 - **Apple Silicon (this machine is darwin/arm64):** task containers are amd64. Docker
@@ -245,7 +291,7 @@ external endpoints and credential-looking references.
 
 ---
 
-## 8. Training data — what we have and what we don't
+## 9. Training data — what we have and what we don't
 
 `dataset/hackathon/` holds only the **training half** (`dev_task_names`) of each pinned
 split. Held-out tasks are absent by design.
@@ -297,7 +343,27 @@ Licensing is **per dataset folder**, not uniform. QF is non-commercial.
 
 ---
 
-## 9. Working style for this repo
+## 10. What actually moved the qf score
+
+Measured on 6 training tasks against a placebo control of **0.333**:
+
+| skill | design | result |
+|---|---|---|
+| v2 (157 lines) | prescriptive procedure: extract a contract, verify, re-derive, "never stop early" | **0.000** — lost both tasks the placebo passed |
+| v3 (36 lines) | domain facts only, opens with "solve the task your own way" | **ahead** — won two tasks the placebo failed |
+
+The lesson is not "shorter is better", it is **do not replace the model's own strategy**.
+The placebo's two passes were its two *cheapest* trials (98k and 199k tokens): the model
+solved them quickly and directly, and an imposed procedure derailed a working approach.
+A skill should supply facts the model lacks — conventions that silently produce a
+wrong-but-plausible number (`ddof`, geometric vs arithmetic annualising, transaction costs,
+percent vs fraction, tie-breaks, string-vs-int sorting) — and leave the method alone.
+
+Corollary: prose in `SKILL.md` is re-injected on every agent step, so it is charged many
+times per trial. A helper script the model *runs* costs one step and produces evidence.
+Prefer scripts over paragraphs, and mention them as optional rather than mandating them.
+
+## 11. Working style for this repo
 
 - **Read trajectories before editing a skill.** `uv run harbor view` shows where the
   learner actually went wrong. Guessing at fixes burns credits.
@@ -313,7 +379,7 @@ Licensing is **per dataset folder**, not uniform. QF is non-commercial.
 
 ---
 
-## 10. Tooling conventions
+## 12. Tooling conventions
 
 **All tools in this repo are Python 3.12+.** Not bash, not a mix. The repo is already a
 Python project (`pyproject.toml`, `uv`), skill scripts must run inside the task container
@@ -402,11 +468,3 @@ Current tools: [`tools/splits.py`](tools/splits.py) (Class A),
 [`submissions/rsi-hack/qf/scripts/check_output.py`](submissions/rsi-hack/qf/scripts/check_output.py)
 (Class B). New tools match these.
 
-## 11. Repo hygiene note
-
-`.env_example` currently has a **real-looking Runware API key committed into it**
-(`RUNWARE_API_KEY=Bxa...`) — it is a tracked, uncommitted modification on `main`.
-`.env_example` is explicitly **not** gitignored (`!.env_example`), so committing this
-publishes the key. It should be reverted to `RUNWARE_API_KEY=` and the actual key kept
-only in `.env`. Flag this to the user rather than committing over it; if the key was
-already pushed anywhere, it should be rotated.

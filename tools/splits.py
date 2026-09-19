@@ -60,8 +60,15 @@ def _tasks(domain: str) -> list[tuple[str, str]]:
             meta = tomllib.loads((d / "task.toml").read_text()).get("metadata", {})
         except (OSError, tomllib.TOMLDecodeError):
             meta = {}
+        # Stratify on whatever the domain actually labels its tasks with. QF uses
+        # difficulty tiers; HealthBench uses behavioural `category`, whose themes have
+        # very different baseline scores, so a split that ignores it can hand the
+        # holdout an unrepresentative theme mix.
         raw = str(meta.get("difficulty", "") or "").strip().lower()
-        out.append((d.name, _STRATA.get(raw, "unknown")))
+        if raw:
+            out.append((d.name, _STRATA.get(raw, raw)))
+        else:
+            out.append((d.name, str(meta.get("category", "") or "unknown").strip().lower()))
     return out
 
 

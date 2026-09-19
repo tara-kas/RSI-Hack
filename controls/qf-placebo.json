@@ -1,0 +1,21 @@
+{
+  "domain": "qf",
+  "arm": "placebo",
+  "source_run": "runs/qf-ctrl + runs/qf-ctrl-b",
+  "n_tasks": 11,
+  "mean": 0.454545,
+  "note": "Valid only for these task names, and only while the learner and its limits are unchanged. Re-measure if hackathon.toml changes.",
+  "scores": {
+    "13f-amendment-aware-crowding": 0.0,
+    "alpha-hedge-strategy": 0.0,
+    "asian-option-levy-curran": 0.0,
+    "binance-btc-participation-tca": 0.0,
+    "bl-regime-hmm": 1.0,
+    "brinson-sector-attribution": 1.0,
+    "corporate-action-adjustment": 1.0,
+    "credit-migration-matrix": 0.0,
+    "cme-hdd-option-pricing": 0.0,
+    "cliquet-ratchet-pricing": 1.0,
+    "copula-sampling-rank-correlation": 1.0
+  }
+}

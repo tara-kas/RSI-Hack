@@ -1,0 +1,12 @@
+{
+    "task": {
+        "path": "/var/folders/7m/7ffzx1nj0zd846lqn8hl57gw0000gq/T/harbor-analyze-6t757l6k/analyze-task__U3UVdB5"
+    },
+    "trial_name": "analyze-task__U3UVdB5__2nHDkBi",
+    "trials_dir": "jobs/2026-09-19__13-40-19",
+    "agent": {
+        "name": "claude-code",
+        "model_name": "claude-haiku-4-5"
+    },
+    "job_id": "f4135961-2875-41b0-a3d2-bb5082af283c"
+}
