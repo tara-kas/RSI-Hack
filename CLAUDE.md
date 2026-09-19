@@ -530,5 +530,10 @@ fired on a correct 3-line ICD-code answer and the learner rewrote it wrong — *
 rules must never fire on short/fixed-format answers; the learner obeys them even when
 wrong.** Fixed (short answers exempt; format-precedence rule + `--mode other` in
 SKILL.md; "never change a correct fact to satisfy the checker"). Current skill = v4 +
-these fixes, not yet evaluated. Next: test-split milestone (skill + one-off placebo).
+these fixes. **Test-split milestone 1** (`runs/health-test-milestone1`, 8 unseen test
+tasks, placebo + skill): placebo 0.379, skill 0.513, **net +0.133** (4 wins, 1 tie,
+3 losses; no CI at n=8) — close to the train estimate, so no sign of heavy overfitting.
+Worst loss (−0.46): a parent-facing clinical document routed to `--mode other`, which
+skips all checks, and it omitted dosing/complication details. Watch OTHER being used as
+an escape hatch for clinical documents.
 Rough cost: ~$0.05/health attempt (grader dominates); time is the constraint.

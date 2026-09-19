@@ -28,7 +28,11 @@ MISSING = re.compile(r"\[not provided|not provided\]|missing|not available|neede
                      r"cannot be (completed|written)|preliminary|draft", re.I)
 CAUTION = re.compile(r"pregnan|allerg|kidney|liver|interact|not (take|use|suitable)|avoid|"
                      r"pharmacist|contraindicat|should not|side effect", re.I)
-VAGUE_Q = re.compile(r"any other (symptoms|concerns|questions)|anything else", re.I)
+TIMEFRAME = re.compile(r"within \d|\d+\s*(-|–|to)?\s*\d*\s*(hours?|days?|weeks?)\b|\btoday\b|\btomorrow\b|"
+                       r"same[- ]day|this week|next few days", re.I)
+CLINICAL = re.compile(r"\b(dose|dosage|mg\b|symptom|diagnos|treatment|infection|fever|pain|medication|"
+                      r"antibiotic|complication|side effect|prescri)", re.I)
+VAGUE_Q =re.compile(r"any other (symptoms|concerns|questions)|anything else", re.I)
 META = re.compile(r"response\.txt|I('ve| have) written|this file|as an ai", re.I)
 # Common drug classes/names; a hit means a medicine was named and needs a caution.
 DRUG = re.compile(r"\b(\w+(cillin|mycin|cycline|floxacin|pril|sartan|olol|statin|prazole|azole|"
@@ -57,7 +61,19 @@ def check(text: str, mode: str) -> list[str]:
     if re.search(r"https?://|www\.|####", text):
         fixes.append("Remove links and '####' lines; they are not part of a reply.")
 
+    # The content checks match English words; on a reply in another language they would
+    # misfire and the learner would damage a correct reply to satisfy them.
+    words = text.split()
+    if len(re.findall(r"\b(the|and|you|your|to|of|is|if|or)\b", text, re.I)) < 0.06 * len(words):
+        return fixes
+    # A short direct answer (a code, a fact) has no room for care tiers; demanding them misfires.
+    if mode == "answer" and len(text) < 1200:
+        return fixes
     if mode == "other":
+        # OTHER skips every content check, so a clinical reply routed here loses them all.
+        if len(text) > 1500 and len(CLINICAL.findall(text)) >= 4:
+            fixes.append("This reply gives clinical content, so it is not mode 'other': re-run the checker "
+                         "with --mode document (or answer/ask) and apply its fixes.")
         return fixes
     if mode == "emergency":
         if not URGENT.search(head):
@@ -68,13 +84,22 @@ def check(text: str, mode: str) -> list[str]:
     elif mode in ("answer", "ask"):
         if mode == "answer" and len(qs) > 3:
             fixes.append(f"{len(qs)} questions: this question can be answered, so explain fully and keep only 0-2 questions.")
-        if mode == "ask" and len(qs) < 2:
-            fixes.append(f"Only {len(qs)} question(s): add 2-4 specific questions at the end (insert_line {n_lines}), "
-                         "highest priority first: urgency signs, then age/pregnancy/conditions/medicines/allergies, then cause.")
+        if mode == "ask" and len(qs) < 3:
+            fixes.append(f"Only {len(qs)} question(s): add 3-5 specific numbered questions right after the opening "
+                         "sentence (insert_line 1): the symptoms/course that change the answer, then age/pregnancy/"
+                         "conditions/medicines/allergies, then ask them to share any results they mention.")
+        elif mode == "ask" and len(qs) > 7:
+            fixes.append(f"{len(qs)} questions is too many: merge into 3-5 short one-line questions, highest priority first.")
+        elif mode == "ask" and text.find(qs[0]) > max(700, len(text) // 3):
+            fixes.append("The questions are at the end: move them up to right after the opening sentence, "
+                         "and make that sentence say which details you need.")
         if len(re.findall(r"(^|[\s(*-])if\b", text, re.I)) < 2:
             fixes.append("Add 2-4 'If ..., then ...' lines covering the main possibilities, including when to see a clinician.")
-        if not URGENT.search(text[: max(600, len(text) // 3)]):
-            fixes.append("Add a short 'Get urgent care now if:' list of warning signs near the top (after the opening sentence).")
+        if not URGENT.search(text[: max(900, len(text) // 3)]):
+            fixes.append("Add a short 'Go to emergency care now if:' list of red-flag signs near the top (after the opening sentence).")
+        if not TIMEFRAME.search(text):
+            fixes.append("Add 'See a doctor within [specific time, e.g. 24 hours / 2-3 days] if:' with the signs or "
+                         "lack of improvement that need an in-person exam.")
     elif mode == "document":
         # Short outputs (a code, a one-line summary) have no sections to mark; demanding
         # markers there made the learner rewrite correct answers.
