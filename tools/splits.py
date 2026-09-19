@@ -67,8 +67,18 @@ def _tasks(domain: str) -> list[tuple[str, str]]:
         raw = str(meta.get("difficulty", "") or "").strip().lower()
         if raw:
             out.append((d.name, _STRATA.get(raw, raw)))
-        else:
-            out.append((d.name, str(meta.get("category", "") or "unknown").strip().lower()))
+            continue
+        category = str(meta.get("category", "") or "").strip().lower()
+        if not category:
+            # HLE keeps its labels in tests/metadata.json rather than task.toml. Stratify on
+            # answer_type: exact-match and multiple-choice questions behave very differently,
+            # so an unstratified split can hand the holdout the wrong mix.
+            try:
+                hle = json.loads((d / "tests" / "metadata.json").read_text())
+                category = str(hle.get("answer_type", "") or "").strip().lower()
+            except (OSError, json.JSONDecodeError):
+                category = ""
+        out.append((d.name, category or "unknown"))
     return out
 
 
