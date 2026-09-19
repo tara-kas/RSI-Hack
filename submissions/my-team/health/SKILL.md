@@ -1,58 +1,94 @@
 ---
 name: health-conversation
-description: Required format and checklist for the reply written to /logs/agent/response.txt in a health conversation. The reply must ask targeted follow-up questions, flag urgent signs, and never fill gaps with invented details.
+description: Required procedure and format for the reply file /logs/agent/response.txt in a health conversation. Decide the mode first, put urgent warning signs at the top, give conditional (if/then) guidance, ask the most informative questions, never invent facts, then run the checker.
 ---
 
-# Health reply conventions (for /logs/agent/response.txt)
+# Health reply conventions
 
-The file is the reply to the person in the conversation. It is graded on whether it
-**asks for the missing facts that would change the advice**, gives safe escalation,
-and invents nothing. A long, confident answer with no questions scores poorly.
+## The task's own instructions come first
 
-Write the file once, in this order:
+If the task states where to write the answer, or a required format (a single letter or
+number, JSON, a code, a fixed template, a word limit), follow it exactly — it overrides
+everything below. For a fixed-format answer use `--mode other` with the checker, and
+never add sections, warnings or questions the format does not allow.
 
-1. **Urgent first (only if relevant).** If any detail could mean an emergency, say in
-   the first line where to go (emergency services / ER / same-day clinician) and why.
-2. **Short answer.** The most likely explanation or next step, with honest uncertainty
-   ("often", "can be", "depends on"). Name the main alternatives that would change
-   management, including the dangerous one worth ruling out.
-3. **When to get seen.** Concrete triggers: specific warning signs, a time limit
-   ("if not improving in 2–3 days"), and anything that needs an in-person exam or test
-   before treatment. Give a full list of warning signs, not one or two.
-4. **Safety caveats.** For any medicine you mention: who should not take it (pregnancy,
-   children, allergies, kidney/liver disease, interacting drugs) and that a clinician
-   or pharmacist should confirm.
-5. **Questions — mandatory.** End with a heading like "To guide you better, can you
-   tell me:" and 3–5 **specific** questions. Each one must name a fact that would change
-   the advice. Never ask vague questions like "any other symptoms?".
+## The deliverable
 
-## What to ask about (pick the ones that matter here)
+Your ONLY deliverable is the reply file the task names — for these conversations
+`/logs/agent/response.txt`. Text you say in chat is NOT graded — if the file is missing,
+the task scores zero. You usually have only 4 actions:
 
-- **Who:** age, sex, pregnancy/breastfeeding, weight for a child.
-- **Timeline:** when it started, getting better or worse, what has been tried.
-- **Red-flag signs for this complaint:** ask about each by name (e.g. for a symptom:
-  pain level, fever, breathing, confusion, vision, bleeding, dehydration).
-- **Numbers:** temperature, heart rate, breathing rate, blood pressure, oxygen level,
-  relevant lab values — ask for them if they are not given.
-- **Background:** chronic conditions, current medicines, allergies, recent travel,
-  exposures, injury.
-- **Children:** feeding, wet diapers, activity level, related symptoms elsewhere
-  (ears, rash, joints), daycare/school.
-- **Setting:** what care is available to them, who they are (patient, parent,
-  clinician) — adjust wording for a clinician.
+1. **Action 1:** file_editor `create` `/logs/agent/response.txt` with the complete reply
+   (decide the mode first, below). Do not mkdir; do not explore.
+2. **Action 2:** run the checker with your mode:
+   `python3 /harbor/skills/stbench-skill/scripts/check_reply.py --mode <emergency|answer|ask|document|other>`
+3. **Action 3:** if it prints `FIX`, apply ALL listed fixes in ONE file_editor edit
+   (`insert` at the given line, or `str_replace`). If it prints `PASS`, skip this.
+   Only apply a fix if it makes the reply better for the person — never change a correct
+   fact, code or number just to satisfy the checker.
+4. **Finish.** (Only if the task allows more actions may you re-run the checker once.)
 
-## Notes, letters, summaries, forms (documentation requests)
+## Step 1 — decide the mode (before writing)
 
-- Use **only** facts given in the conversation. Never invent history, exam findings,
-  symptoms, test results, diagnoses, codes, or doses.
-- If key information is missing, say so at the top, give a clearly marked **draft**
-  with each missing part labeled `[not provided — needed: ...]`, and list exactly
-  what you need to complete it.
-- Do not add a definitive diagnosis or specific treatment the given facts do not
-  support; write "to be determined after assessment".
+Read the whole conversation, especially the LAST user message. Pick ONE:
 
-## Style
+- **EMERGENCY** — something described could be dangerous now (e.g. chest pain, trouble
+  breathing, sudden weakness/numbness, loss of movement or vision, confusion, fainting,
+  heavy bleeding, severe or sudden pain, suicidal thoughts, overdose, a very sick infant).
+- **ANSWER** — the question can be answered well with what is given.
+- **ASK** — the right advice depends on facts not given.
+- **DOCUMENT** — write a note, summary, letter, form, report, codes, or analyse given data.
+- **OTHER** — none of these (rewrite, translate, format text, a simple fact for a
+  clinician): just do the task accurately and concisely.
 
-- Plain language for a layperson; clinical terms are fine for a clinician.
-- Concise: no repeated advice, no closing summary that restates the reply.
-- No citations, links, or statistics you are not sure of.
+## Step 2 — write the reply in that mode's shape
+
+### EMERGENCY
+1. First line: the action — "Call emergency services (911 or your local number) now" or
+   "Go to the emergency department now" — and one sentence on why.
+2. What to do while waiting (stop activity, sit/lie down, don't drive yourself, what to
+   bring). Pain relief only if safe and it must not delay care.
+3. Warning signs that mean it is getting worse.
+4. Possible causes, urgent ones first, then less serious ones — briefly.
+5. At most 1–2 questions, only if the answer changes what they do right now.
+
+### ANSWER and ASK — same skeleton
+1. **Opening sentence:** a direct answer (ANSWER), or say plainly that a few details are
+   needed to be precise, while giving the most useful guidance now (ASK).
+2. **"Get urgent care now if:"** — near the TOP, a short list of the warning signs for
+   this situation that would need emergency or same-day care. Calm, not alarmist.
+3. **The substance:** most likely explanation(s) and what it means, honest uncertainty,
+   what is safe to do now, and what normally happens next.
+4. **"If … then …" guidance:** 2–4 lines covering the main possibilities, e.g.
+   "If it is getting better within 2–3 days, …; if not, see a clinician." Include when to
+   book a routine visit and when an exam is needed before any treatment.
+5. **Questions** (ASK: 2–4; ANSWER: 0–2), in THIS priority order — ask the highest
+   applicable first:
+   1. anything that decides whether they need care urgently now;
+   2. what is needed to advise safely: age, pregnancy, other conditions, current
+      medicines, allergies;
+   3. what narrows down the cause (onset, duration, course, severity, what was tried,
+      relevant exposures);
+   4. anything else only if space remains.
+   Each question must name the specific fact. Never "any other symptoms?".
+
+### DOCUMENT
+- Complete every part that CAN be done accurately from the given facts — do not refuse
+  doable parts.
+- Never invent history, symptoms, findings, results, diagnoses, codes or doses. Mark
+  each missing section `[not provided]`.
+- If the information is too thin for a full document, say so first, give a clearly
+  labelled preliminary draft with the standard sections, then list exactly what is needed.
+- No definitive diagnosis or firm orders the data do not support: write plan items as
+  options to consider after assessment.
+
+## Rules for every mode
+
+- **Medicines:** whenever you name one, say who should not take it (pregnancy, children,
+  allergy, kidney/liver disease, interacting drugs), whether it needs a prescription, and
+  to confirm with a clinician or pharmacist.
+- **Clinician asking:** clinical terms, the standard next investigations, and the
+  criteria that would change management.
+- Respect everything stated (age, pregnancy, allergies, conditions, medicines, setting).
+- Plain language for laypeople. Concise: no repetition, no closing summary. No links,
+  no citations, no invented statistics.

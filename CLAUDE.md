@@ -124,6 +124,22 @@ Per-domain limits that constrain skill design:
 **`health` has only 4 learner turns and a 5-minute timeout** — a health skill must not
 prescribe long multi-step exploration; it has to pay off in the first response.
 
+### How the skill actually reaches the learner (verified from trial logs)
+
+- OpenHands appends `SKILL.md` to the END of the system prompt as
+  `[BEGIN context from [stbench-skill]]`, inside `<REPO_CONTEXT><UNTRUSTED_CONTENT>` with the
+  line *"use these instructions for coding style, project conventions, and documentation
+  guidance only."* The model is primed to treat the skill as untrusted repo conventions —
+  phrase rules as the required procedure/format for the deliverable, not as persona advice.
+- Only `SKILL.md` is injected. Supporting files are mounted at
+  `/harbor/skills/stbench-skill/...` and are only used if `SKILL.md` tells the learner to
+  run/read them by absolute path.
+- The learner's tools are `terminal`, `file_editor`, `task_tracker`, `finish`. One tool call
+  = one iteration, so `max_iterations` is an action budget.
+- `trajectory.json` does NOT contain the skill text. To tell arms apart, grep the trial's
+  `agent/openhands_sdk.txt`: `Loaded 0 skills` = baseline; placebo text vs our text
+  distinguishes the other two.
+
 ---
 
 ## 5. Repo layout
@@ -136,6 +152,12 @@ src/skilltrainbench/        harness: gateway.py, harbor.py, evaluate.py, scoring
 submissions/                our skills live here
   README.md                 submission layout + check-skill
   example-team/health/SKILL.md   format-only example, not tuned for anything
+  rsi-hack/qf/              QF skill (SKILL.md, reference/, scripts/check_output.py)
+  my-team/health/           health skill (SKILL.md, scripts/check_reply.py) — team name
+                            is a placeholder; user wants it kept here for now
+tools/                      Class A host tools (splits.py, health_report.py)
+splits/                     local train/test splits, <domain>-80-20-s20260919.json
+runs/                       eval outputs (gitignored)
 dataset/hackathon/          downloaded training tasks (gitignored)
 .github/workflows/check-submissions.yml   runs check-skill on every PR touching submissions/
 .env_example / .env         RUNWARE_API_KEY, optional HF_TOKEN
@@ -198,6 +220,37 @@ Evaluate (**spends credits — confirm with the user first**):
 uv run stbench eval --domain health --skill submissions/my-team/health --limit 8 --out runs/health-v1
 ```
 
+**On this Windows machine always prefix evals with `PYTHONUTF8=1`** (see §7), and select
+tasks from the local split rather than `--limit` (which takes the alphabetically-first N):
+
+```bash
+PYTHONUTF8=1 uv run stbench eval --domain health --skill submissions/my-team/health \
+  --arms skill --tasks "$(uv run python tools/splits.py tasks --domain health --split train --limit 15)" \
+  --out runs/health-vN
+```
+
+Local splits (Class A tool, deterministic, stratified by `difficulty`, falling back to
+`metadata.category` when a domain has no difficulty tiers):
+
+```bash
+uv run python tools/splits.py create --domain tau3      # once per domain
+uv run python tools/splits.py show   --domain tau3
+uv run python tools/splits.py tasks  --domain tau3 --split train --limit 5
+```
+
+Iterate on `train` only. Touch `test` only for milestone checks. Pick tasks balanced
+across categories when the sorted `--limit` prefix would be lopsided.
+
+Arms: the placebo text never changes, so once a task set has a placebo score, later
+iterations run `--arms skill` only. Run `placebo` once on any NEW task set you want a
+net delta for (e.g. the first test-split milestone).
+
+Failure taxonomy for a health run (free, reads files only):
+
+```bash
+PYTHONUTF8=1 uv run python tools/health_report.py runs/health-v4 --arm skill
+```
+
 Useful `eval` flags:
 
 - `--arms baseline,skill` (default); add `placebo` to measure what the leaderboard
@@ -217,6 +270,10 @@ Read trajectories — what the learner actually did, step by step:
 uv run harbor view runs/health-v1/harbor-jobs
 ```
 
+Open it as `http://127.0.0.1:8080` explicitly — browsers that auto-upgrade to https cause
+`Invalid HTTP request received` warnings (harmless `WinError 10054` tracebacks too). The
+viewer shows saved runs only, not live progress.
+
 Pre-submission check (same check the PR CI runs):
 
 ```bash
@@ -233,10 +290,34 @@ external endpoints and credential-looking references.
 ## 7. Environment gotchas
 
 - **Docker must be running** before any eval.
-- **Apple Silicon (this machine is darwin/arm64):** task containers are amd64. Docker
-  Desktop → Settings → General → **"Use Rosetta for x86_64/amd64 emulation on Apple
-  Silicon"** must be ON, then Apply & restart. The default QEMU emulation crashes while
-  the learner agent installs. `stbench eval` prints a warning when it is off.
+- **This machine is Windows 10** (x86_64, 4 cores/8 threads, 15.8 GB RAM, often <2 GB
+  free), Docker Desktop with an **8 GB / 8 CPU** Linux VM. Git Bash and PowerShell both
+  available. (Apple Silicon note for other machines: enable Rosetta in Docker Desktop.)
+- **`PYTHONUTF8=1` is mandatory for evals.** `evaluate.py` writes `attempts.jsonl` with the
+  default cp1252 encoding; one non-ASCII char (e.g. `≥`) in a learner answer crashes the
+  write and `eval_result.json` is never produced. If that happens, per-trial rewards,
+  answers and verdicts are still in `harbor-jobs/*/task__*/{verifier,agent}/`.
+- **Every attempt installs the learner agent over the internet** (apt, `astral.sh` uv,
+  Python 3.12, openhands-sdk): ~2.5 min of the ~4–5 min per health attempt. Flaky DNS here
+  causes `Could not resolve host`, apt exit 100, and occasional exit 137 (OOM in 512 MB
+  health containers). The harness retries infra failures 3×; if one attempt exhausts
+  retries the whole eval raises. Concurrency 4 also triggers Docker buildx
+  `rename ... being used by another process` build errors (retried automatically).
+  The user prefers concurrency 4 for speed; accept the retries.
+- **Docker Desktop can crash mid-eval** (seen 2026-09-19 ~14:38, likely host memory
+  pressure): `Docker Desktop is unable to start`, the next attempt exhausts retries, the
+  eval aborts (the harness's kill path also raises `signal has no attribute SIGKILL` on
+  Windows). `docker desktop start` says "already running" — use `docker desktop restart`.
+  Then rerun only the missing tasks into a new `--out` and merge with the completed ones.
+- **Do NOT set `"dns"` in `~/.docker/daemon.json`.** Tried 2026-09-19: it breaks
+  `host.docker.internal` resolution, so the learner cannot reach the gateway and every
+  attempt fails with `LLMServiceUnavailableError ... Connection error`. Keep Docker's
+  built-in DNS.
+- **Resource budget:** a health attempt is 1 CPU / 512 MB. A **tau3 attempt asks for
+  4 CPUs / 8 GB** — the whole Docker VM. Never run tau3 alongside another eval; run tau3
+  with `--concurrency 1`, close heavy apps first, and consider raising the WSL2 limit
+  (`%UserProfile%\.wslconfig` → `[wsl2] memory=12GB`, `wsl --shutdown`, restart Docker)
+  only between runs.
 - Requires Docker, `uv`, Python ≥ 3.12, and a Runware API key.
 - Docker Desktop's kernel often cannot enforce the network allowlist, so local task
   containers may have public egress. **Do not rely on internet access** — scored runs on
@@ -257,11 +338,11 @@ split. Held-out tasks are absent by design.
 | `QuantitativeFinance-Bench` | `qf-medhard-strat-80-s005` (`medium_hard`) | 54 | 14 |
 | `tau3-bench` | `tau3-banking-70-s001` (`banking_knowledge`) | 67 | 30 |
 
-**Current local state (verify before trusting):** only `QuantitativeFinance-Bench`
-(54 tasks) and `healthbench` (~164 of the 200 task dirs listed in its `dataset.toml`)
-are downloaded. `hle/` and `tau3-bench/` are **missing** — re-run
-`uv run stbench data pull` before working those domains, and expect
-`stbench tasks --domain hle|tau3` to come up empty until then.
+**Current local state (verified 2026-09-19):** all four are downloaded —
+`healthbench` 200, `hle` 412, `QuantitativeFinance-Bench` 54, `tau3-bench` 67 task dirs.
+Splits exist for `qf` and `health`; `tau3` and `hle` have none yet. All 67 tau3 tasks are
+`difficulty = "medium"`, `category = "customer_service"`, so `tools/splits.py` gives them
+a single stratum.
 
 Task folder shape (Harbor format):
 
@@ -290,7 +371,11 @@ Domain notes worth knowing:
   common failure mode and a good skill target. Tasks pass/fail via pytest writing a
   reward to `/logs/verifier/reward.txt`. Tasks carry a canary GUID; never reproduce it.
 - **τ³-bench** — MIT, Sierra Research, banking knowledge; simulated customer via tool
-  calls.
+  calls. Task folders differ from the other domains: `environment/` has a
+  `docker-compose.yaml` plus a `runtime-server/` (`server.py`, `task_config.json`), and
+  `tests/` has `evaluate.py` + `config.json`. `[agent] timeout_sec = 3600`.
+  `task_config.json` and `tests/` hold task-specific expected outcomes — read to
+  understand the domain, never transcribe into a skill.
 - **HLE** — expert-level STEM questions, model-graded.
 
 Licensing is **per dataset folder**, not uniform. QF is non-commercial.
@@ -398,15 +483,52 @@ Rules:
 - Print human-readable text to stdout. Add `--json` only when something will parse it.
 - Comments explain **why**, not what. Match the surrounding density.
 
-Current tools: [`tools/splits.py`](tools/splits.py) (Class A),
-[`submissions/rsi-hack/qf/scripts/check_output.py`](submissions/rsi-hack/qf/scripts/check_output.py)
-(Class B). New tools match these.
+Current tools — new tools match these:
 
-## 11. Repo hygiene note
+| tool | class | what it does |
+|---|---|---|
+| [`tools/splits.py`](tools/splits.py) | A | deterministic stratified train/test splits; `tasks` prints a `--tasks` list |
+| [`tools/health_report.py`](tools/health_report.py) | A | health failure taxonomy: per-attempt score + 1–2 sentence why, structural flags, rubric points lost per axis |
+| [`submissions/rsi-hack/qf/scripts/check_output.py`](submissions/rsi-hack/qf/scripts/check_output.py) | B | QF output-file schema validator |
+| [`submissions/my-team/health/scripts/check_reply.py`](submissions/my-team/health/scripts/check_reply.py) | B | health reply structure check per mode; prints PASS or FIX + one-line fixes |
 
-`.env_example` currently has a **real-looking Runware API key committed into it**
-(`RUNWARE_API_KEY=Bxa...`) — it is a tracked, uncommitted modification on `main`.
-`.env_example` is explicitly **not** gitignored (`!.env_example`), so committing this
-publishes the key. It should be reverted to `RUNWARE_API_KEY=` and the actual key kept
-only in `.env`. Flag this to the user rather than committing over it; if the key was
-already pushed anywhere, it should be rotated.
+Class B gotcha: importing a skill script from the host (as `health_report.py` does) writes
+`__pycache__/` into the skill folder, which would ship. Set `sys.dont_write_bytecode = True`
+before importing, and check `find submissions/<team>/<domain> -type f` before submitting.
+
+## 11. The iteration loop that worked (health, 2026-09-19)
+
+Apply the same method to every domain:
+
+1. **Measure before editing.** Baseline + placebo + skill on a few train tasks, then read
+   the grader output per task — not just the mean.
+2. **Deterministic taxonomy, not vibes.** Write a Class A report tool that turns a run into
+   per-attempt `(score, why_it_failed)` lines and counted buckets (health: rubric points
+   lost per `axis:` tag + structural flags). Fix the biggest bucket first.
+3. **Infra failures first.** The costliest early bug was not medical: the learner answered
+   in chat and never wrote `/logs/agent/response.txt` → whole task scored as empty. Find the
+   deliverable contract for the domain and make the skill's first instruction enforce it.
+4. **Tools beat prose, within the action budget.** A Class B checker the learner runs on
+   its own output (write → check → one fix → finish) fit health's 4-action budget and was
+   used 15/15 times. Only add a tool if the budget has room and the failure is common
+   (a calculator was rejected: calc criteria appear in 7/160 health tasks).
+5. **Mine the whole train split, not the 6 tasks you read.** Aggregating all train rubrics
+   found benchmark-wide shared criteria (e.g. health's question-priority hierarchy,
+   conditional "if/then" guidance) worth more than per-task fixes.
+6. **Overfitting guard.** Every rule must be backed by a pattern across many train tasks or
+   be standard domain practice; drop anything traceable to 1–2 tasks; never use rubric or
+   assertion wording. Include a fallback mode so rigid templates don't misfire on odd
+   tasks. Judge on the untouched test split.
+7. **Noise.** Same task, same skill, rerun: swings of ±0.3 are normal on health. Compare
+   on ≥12 tasks and the same task set.
+
+Health status (2026-09-19): on the 6 tasks with placebo scores — placebo 0.299,
+baseline 0.281, v3 0.437, v4 0.456 (net +0.157, beats placebo 5/6). On 15 train tasks
+v3 0.444 ≈ v4 0.434 (v4 better on context_seeking/emergency, worse on data tasks).
+v4 lost −0.72 on one task because the checker's DOCUMENT rule and a "too short" rule
+fired on a correct 3-line ICD-code answer and the learner rewrote it wrong — **checker
+rules must never fire on short/fixed-format answers; the learner obeys them even when
+wrong.** Fixed (short answers exempt; format-precedence rule + `--mode other` in
+SKILL.md; "never change a correct fact to satisfy the checker"). Current skill = v4 +
+these fixes, not yet evaluated. Next: test-split milestone (skill + one-off placebo).
+Rough cost: ~$0.05/health attempt (grader dominates); time is the constraint.
