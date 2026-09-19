@@ -36,6 +36,19 @@ CONTROL_DIR = REPO_ROOT / "controls"
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 
+def _crashed(trial: dict) -> bool:
+    """True when the agent process died rather than answering.
+
+    Harbor still writes a completed trial and the verifier still runs, so the attempt is
+    recorded as reward 0.0 — indistinguishable from a wrong answer. Counting those as
+    failures biases every comparison, and the bias is not symmetric: whichever arm happens to
+    hit more upstream API errors looks worse. Excluding them measures the learner rather than
+    the network.
+    """
+    info = trial.get("exception_info") or {}
+    return "NonZeroAgentExitCode" in str(info.get("exception_type", ""))
+
+
 def _scores(run: Path, arm: str) -> dict[str, float]:
     """Per-task scores for one arm. Prefers eval_result.json, falls back to attempts.jsonl
     so an interrupted run is still usable."""
@@ -49,6 +62,32 @@ def _scores(run: Path, arm: str) -> dict[str, float]:
             return out
 
     attempts = run / "attempts.jsonl"
+<<<<<<< Updated upstream
+=======
+    if attempts.is_file() and attempts.stat().st_size:
+        for line in attempts.read_text().splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("arm") == arm and isinstance(row.get("score"), (int, float)):
+                merged[row.get("task_name") or row.get("task_id")] = float(row["score"])
+    import glob as _g
+    for path in _g.glob(str(run / "harbor-jobs" / "*" / "*" / "result.json")):
+        try:
+            data = json.loads(Path(path).read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not data.get("finished_at"):
+            continue
+        if _crashed(data):
+            continue
+        reward = (data.get("verifier_result") or {}).get("rewards", {}).get("reward")
+        if isinstance(reward, (int, float)):
+            merged.setdefault(str(data.get("task_name", "")).split("/")[-1], float(reward))
+    if merged:
+        return merged
+
+>>>>>>> Stashed changes
     if not attempts.is_file() or not attempts.stat().st_size:
         # Last resort: read Harbor's per-trial results. A run that is killed (or that
         # exhausts its token budget) never writes the summary files, and those trials are

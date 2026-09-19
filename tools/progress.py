@@ -36,6 +36,14 @@ def _budgets() -> dict[str, int]:
             for name, t in cfg.get("domains", {}).items()}
 
 
+def _crashed(trial: dict) -> bool:
+    """True when the agent process died rather than answering. Harbor still writes a finished
+    trial and the verifier still runs, so this is recorded as reward 0.0 and looks exactly
+    like a wrong answer. These must be surfaced, not silently counted as failures."""
+    info = trial.get("exception_info") or {}
+    return "NonZeroAgentExitCode" in str(info.get("exception_type", ""))
+
+
 def _seconds(block: dict | None) -> float | None:
     if not block or not block.get("started_at"):
         return None
@@ -129,10 +137,19 @@ def report(run: Path, budgets: dict[str, int]) -> bool:
                 print(f"  in-flight elapsed: " +
                       ", ".join(f"{(_seconds(d) or 0) / 60:.0f}m" for _, d in running[:6]))
 
+    n_crashed = 0
     for trial_dir, data in done:
         reward = (data.get("verifier_result") or {}).get("rewards", {}).get("reward")
         task = data.get("task_name", "?").split("/")[-1]
-        print(f"    {task[:44]:<46} {_arm(trial_dir):<9} reward={reward}")
+        flag = ""
+        if _crashed(data):
+            n_crashed += 1
+            flag = "  <-- AGENT CRASHED, not a real 0"
+        print(f"    {task[:44]:<46} {_arm(trial_dir):<9} reward={reward}{flag}")
+    if n_crashed:
+        print(f"  WARNING: {n_crashed}/{len(done)} finished trials crashed (upstream API or "
+              "container error). They score 0.0 but measure nothing — exclude them before "
+              "comparing arms.")
 
     near_limit = False
     if budget:

@@ -1,0 +1,19 @@
+{
+  "domain": "hle",
+  "arm": "placebo",
+  "n_tasks": 9,
+  "mean": 0.3333,
+  "source_run": "runs/hle-ctrl + runs/hle-ctrl2 (crashed trials excluded)",
+  "note": "Crashed agent trials are excluded: Harbor scores them 0.0 but they measure nothing.",
+  "scores": {
+    "hle__66e8ccd402beabf885334534": 0.0,
+    "hle__66e8e6c8f59e5564daf565bd": 0.0,
+    "hle__66e91bc08dd8f00467e3d5d8": 0.0,
+    "hle__66e932f00bd16d40d4bc4d81": 0.0,
+    "hle__66e942c180435ab1cb1ef049": 1.0,
+    "hle__66e949664ea2c791558f8620": 1.0,
+    "hle__66e96946cde24c5e61925dc1": 0.0,
+    "hle__66ea2cc3c602e2b991ae8aba": 1.0,
+    "hle__66ea3fb6e2dc97dd61195fe6": 0.0
+  }
+}
