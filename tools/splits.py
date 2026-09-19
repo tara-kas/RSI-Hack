@@ -6,7 +6,8 @@ the LOCAL training tasks into a `train` half we iterate against and a `test` hal
 deliberately never look at, so that a local improvement has some chance of being a real
 improvement rather than memorisation of the tasks we tuned on.
 
-Splits are deterministic (stratified by task difficulty, fixed seed) and written to
+Splits are deterministic (stratified by task difficulty, or by category where a domain
+has no difficulty tiers; fixed seed) and written to
 splits/<domain>-<train>-<test>-s<seed>.json so a rerun reproduces them exactly.
 
     python tools/splits.py create --domain qf
@@ -61,7 +62,13 @@ def _tasks(domain: str) -> list[tuple[str, str]]:
         except (OSError, tomllib.TOMLDecodeError):
             meta = {}
         raw = str(meta.get("difficulty", "") or "").strip().lower()
-        out.append((d.name, _STRATA.get(raw, "unknown")))
+        if raw:
+            out.append((d.name, _STRATA.get(raw, "unknown")))
+        else:
+            # HealthBench has no difficulty tiers; its behaviour category (context_seeking,
+            # emergency_referrals, health_data_tasks) is what varies the score.
+            cat = str(meta.get("category", "") or "").strip().lower()
+            out.append((d.name, cat or "unknown"))
     return out
 
 
